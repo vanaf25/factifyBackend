@@ -4,12 +4,14 @@ import { UserDetails } from './user-details.interface';
 import { JwtGuard } from "../auth/guards/jwt.guard";
 import { GetUser } from "../auth/decorators/get-user-decorator";
 import { UpdatePasswordDto } from "./dtos/update-password.dto";
+import { Cron } from "@nestjs/schedule";
+import { RolesGuard } from "../auth/guards/role.guard";
 
 @Controller('user')
 export class UserController {
   constructor(private userService: UserService) {}
     @Get("/all")
-    @UseGuards(JwtGuard)
+    @UseGuards(JwtGuard,RolesGuard)
     getAllUsers(){
     return this.userService.getAllUsers()
     }
@@ -65,5 +67,8 @@ export class UserController {
   getUser(@Param('id') id: string): Promise<UserDetails | null> {
     return this.userService.findById(id);
   }
-
+  @Cron('0 0 1 * *')
+  async handleCron() {
+    await this.userService.creditsBasedOnSubscriptionDate();
+  }
 }

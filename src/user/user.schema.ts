@@ -14,7 +14,7 @@ export class User {
   password: string;
   @Prop({ required: true,default:50 })
   credits: number;
-  @Prop({ required: true,default:"Starter plan" })
+  @Prop({ default:"" })
   subscription: string;
   @Prop({
     type: [{ type: Types.ObjectId, ref: 'Fact' }],
@@ -30,9 +30,24 @@ export class User {
   ltdCodes: Types.ObjectId[];
   @Prop({default:""})
   resetToken: string;
-
+  @Prop({default:""})
+  subscriptionType: string;
+  @Prop({ default: false })
+  subscriptionIsActive: boolean; // Indicates if the user has an active subscription
+  @Prop({ type: Date })
+  subscriptionEndDate: Date; // Date when the subscription ends
+  @Prop({ type: Date })
+  lastCreditUpdate: Date;
   @Prop({default:""})
   resetTokenExpiration: Date;
+  @Prop({ type: Date })
+  subscriptionStartDate: Date;
+  @Prop({default:""})
+  stripeCustomerId:string
+  @Prop({default:""})
+  subscriptionId:string
+  @Prop({ type: String, enum: ['user', 'admin'], default: 'user' })
+  role: 'user' | 'admin';
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

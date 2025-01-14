@@ -7,27 +7,171 @@ import {
 } from "@nestjs/common";
 import { InjectModel } from '@nestjs/mongoose';
 import { v4 as uuidv4 } from 'uuid';
+import * as SibApiV3Sdk from 'sib-api-v3-sdk';
 import mongoose, { Model, Types } from "mongoose";
 import { UserDetails } from './user-details.interface';
-import * as nodemailer from 'nodemailer';
 import { UserDocument } from './user.schema';
 import { FactService } from "../fact/fact.service";
 import * as bcrypt from 'bcrypt'
 import { UpdatePasswordDto } from "./dtos/update-password.dto";
+import { ConfigService } from "@nestjs/config";
 
 @Injectable()
 export class UserService {
+  private readonly brevoClient: SibApiV3Sdk.TransactionalEmailsApi;
   constructor(
     @InjectModel('User') private readonly userModel: Model<UserDocument>,
     @Inject(forwardRef(() => FactService))
-    private readonly factsService: FactService, // Inject UsersService
-  ) {}
+    private readonly factsService: FactService,
+    private configService: ConfigService,
+  ) {
+    this.brevoClient = new SibApiV3Sdk.TransactionalEmailsApi();
+    SibApiV3Sdk.ApiClient.instance.authentications["api-key"].apiKey =this.configService.get<string>('BREVO_API_KEY');
+  }
+  async findByStripeCustomerId(customerId: string): Promise<any | null> {
+    return this.userModel.findOne({ stripeCustomerId: customerId }).exec();
+  }
   _getUserDetails(user: UserDocument): UserDetails {
     return {
       id: user._id as string,
       name: user.name,
       email: user.email,
+      role:user.role,
     };
+  }
+  _getUserDetailsWithMail(user: UserDocument):UserDetails{
+    //Send email when user register on factify;
+    return {
+      id: user._id as string,
+      name: user.name,
+      email: user.email,
+      role:user.role
+    };
+  }
+  async changeSubscription(userId: string, data:
+    {plan:string,customerId:string,subscriptionId:string,type:string}) {
+    const newPlan=data.plan;
+    const user = await this.userModel.findById(userId);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const plans = {
+      'starter': 10,
+      'pro': 100,
+      'business': 150,
+    };
+
+    if (!plans[newPlan]) {
+      throw new BadRequestException('Invalid subscription plan');
+    }
+    function getSubscriptionEndDate(type:string) {
+      const endDate = new Date(); // Create a copy of the start date
+
+      if (type === 'month') {
+        endDate.setMonth(endDate.getMonth() + 1); // Add 1 month
+      } else if (type === 'year') {
+        endDate.setFullYear(endDate.getFullYear() + 1); // Add 1 year
+      }
+
+      return endDate;
+    }
+    // Update subscription, credits, and set the subscription start date
+    user.subscription = newPlan;
+    user.subscriptionId=data.subscriptionId;
+    user.stripeCustomerId=data.customerId;
+    user.credits += plans[newPlan];
+    user.subscriptionStartDate = new Date(); // Start date of the new subscription
+    user.lastCreditUpdate = new Date();
+    user.subscriptionType=data.type
+    user.subscriptionEndDate=getSubscriptionEndDate(data.type);
+    user.subscriptionIsActive=true;
+    // Reset last update to today
+    await user.save();
+    await this.sendConfirmationSubscriptionEmail(user.email,user.name,
+      {plan:newPlan,credits:plans[newPlan],type:data.type})
+    return user;
+  }
+  async creditsBasedOnSubscriptionDate() {
+    console.log('cron Handle!');
+    const plans = {
+      'starter': 10,
+      'pro': 100,
+      'business': 150,
+    };
+
+    const today = new Date();
+    const users = await this.userModel.find();
+
+    for (const user of users) {
+      if (!user.subscriptionStartDate || user.subscriptionType==="month") continue;
+      function isPastOrToday(date) {
+        if(date){
+          const today = new Date();
+          const toDateFormat=new Date(date)
+          today.setHours(0, 0, 0, 0);
+          toDateFormat.setHours(0, 0, 0, 0);
+          return toDateFormat <= today;
+        }
+        return false
+      }
+
+      console.log(`${user.email}:`,user.subscriptionEndDate);
+      if(!user.subscriptionIsActive && isPastOrToday(user.subscriptionEndDate)){
+        await this.resetUserSubscription(user._id as string);
+      }
+      // Check if today matches the subscription renewal day
+      const subscriptionDay = user.subscriptionStartDate.getDate();
+      const currentDay = today.getDate();
+
+      if (subscriptionDay === currentDay) {
+        console.log('credits gets:',user.email);
+        user.credits += plans[user.subscription] || 0;
+        user.lastCreditUpdate = today;
+        await this.sendSubscriptionEmail(user.email,user.name,{plan:user.subscription,
+          credits:plans[user.subscription]})
+        await user.save();
+      }
+    }
+  }
+  async updateMonthlyCredits() {
+    const users = await this.userModel.find({ isActive: true });
+
+    users.forEach(async (user) => {
+      const currentDate = new Date();
+
+      // Check if it's time to update credits (monthly)
+      if (user.lastCreditUpdate && user.lastCreditUpdate.getMonth() === currentDate.getMonth()) {
+        return; // Skip if credits have already been updated this month
+      }
+
+      let additionalCredits = 0;
+
+      switch (user.subscription) {
+        case 'Starter plan':
+          additionalCredits = 10;
+          break;
+        case 'Pro plan':
+          additionalCredits = 100;
+          break;
+        case 'Business plan':
+          additionalCredits = 500;
+          break;
+      }
+
+      // Update user credits and last credit update date
+      user.credits += additionalCredits;
+      user.lastCreditUpdate = currentDate;
+
+      await user.save();
+    });
+  }
+  async resetUserSubscription(userId:string){
+    const u=await this.findById2(userId);
+    u.subscription="";
+    u.subscriptionId="";
+    u.subscriptionType=""
+    u.subscriptionIsActive=false
   }
   async applyCode(userId: Types.ObjectId, codeId: string) {
     const user = await this.userModel.findById(userId);
@@ -51,7 +195,9 @@ export class UserService {
   }
   async getBasicUser(userId:string){
     const u=await this.findById2(userId);
-    return {id:u._id,email:u.email,name:u.name,credits:u.credits,subscription:u.subscription}
+    return {id:u._id,email:u.email,name:u.name,
+      credits:u.credits,subscription:u.subscription,
+      subscriptionType:u.subscriptionType}
   }
   getAllUsers(){
     return this.userModel.find().exec()
@@ -99,7 +245,7 @@ export class UserService {
 
     return user;
   }
-  async updateUser(userId: string, updateUserDto: UpdatePasswordDto) {
+  async updateUser(userId: string, updateUserDto: any) {
     const updatedUser = await this.userModel.findByIdAndUpdate(
       userId,
       { $set: updateUserDto },
@@ -133,11 +279,11 @@ export class UserService {
         options: { sort: { createdAt: -1 }, limit: 15 }, // Sort by createdAt in descending order, limit to 15
       })
     return [...user.facts].map((u:any)=>{
-        return {
-          ...JSON.parse(JSON.stringify(u)),
-          favoriteUsers:undefined,
-          isFavorite:u?.favoriteUsers?.includes(new mongoose.Types.ObjectId(userId))}
-      })
+      return {
+        ...JSON.parse(JSON.stringify(u)),
+        favoriteUsers:undefined,
+        isFavorite:u?.favoriteUsers?.includes(new mongoose.Types.ObjectId(userId))}
+    })
   }
   async findById(id: string): Promise<UserDetails | null> {
     const user = await this.userModel.findById(id).exec();
@@ -149,6 +295,43 @@ export class UserService {
     if (!user) return null;
     return user
   }
+  async sendWelcomeEmail(email: string, name: string) {
+    await this.emailTemplate(email,`Welcome to Factify!`,`
+        <p>Hello ${name},</p>
+        <p>Welcome to Factify! We're glad to have you with us.</p>
+        <p>Enjoy discovering new facts!</p>
+      `);
+  }
+  async cancelSubscription(userId:string){
+    const u=await this.findById2(userId);
+    console.log('u:s',u);
+    if(u.subscriptionType==="month"){
+      u.subscription="";
+      u.subscriptionId="";
+      u.subscriptionType=""
+      u.subscriptionIsActive=false
+      await u.save();
+    }
+    else  {
+      u.subscriptionIsActive=false
+      await u.save();
+    }
+    return u;
+  }
+  async sendConfirmationSubscriptionEmail(email: string, name: string,planData:any) {
+    await this.emailTemplate(email,`You activate a ${planData.plan}`,`
+        <p>Hello ${name},</p>
+        <p>Based on your ${planData.plan} plan, You will receive every month
+         a ${planData.credits} credits!</p>
+         <p>You will must to pay for this subscription every ${planData.type}</p>
+      `)
+  }
+  async sendSubscriptionEmail(email: string, name: string,planData:any) {
+    await this.emailTemplate(email,"You recevied the credits!",`
+        <p>Hello ${name},</p>
+        <p>Based on your ${planData.plan} plan You received a ${planData.credits} credits!</p>
+      `)
+  }
   async create(
     name: string,
     email: string,
@@ -159,7 +342,11 @@ export class UserService {
       email,
       password: hashedPassword,
     });
-    return newUser.save();
+    const savedUser = await newUser.save();
+    console.log('welcm!!!');
+    await this.sendWelcomeEmail(email, name);
+    console.log('reg');
+    return savedUser;
   }
   async addFavorite(userId: string, factId: string) {
     if (!Types.ObjectId.isValid(userId)) {
@@ -207,10 +394,10 @@ export class UserService {
       throw new BadRequestException('Fact is not in favorites');
     }
     const fact=await this.factsService.findById(factId);
-      const userIndex=fact.favoriteUsers.indexOf(userId as any)
+    const userIndex=fact.favoriteUsers.indexOf(userId as any)
     fact.favoriteUsers.splice(userIndex,1)
-        user.favoriteFacts.splice(factIndex, 1);
-      await fact.save();
+    user.favoriteFacts.splice(factIndex, 1);
+    await fact.save();
     return user.save();
   }
 
@@ -259,23 +446,25 @@ export class UserService {
     await user.save();
   }
   async sendResetEmail(email: string, token: string) {
-    const transporter = nodemailer.createTransport({
-      service: 'gmail', // e.g., 'Gmail', 'Yahoo', etc.
-      auth: {
-        user: 'vanayfefilov777@gmail.com', // replace with your email
-        pass: 'lomo lrcf czdb ygbk', // replace with your email password
-      },
-    });
     const resetUrl = `https://factify-ochre.vercel.app/reset-password/${token}`;
-
-    const mailOptions = {
-      from: '"Factify Support" <your-email@gmail.com>',
-      to: email,
-      subject: 'Password Reset Request',
-      text: `You requested a password reset. Please use the following link to reset your password: ${resetUrl}`,
-      html: `<p>You requested a password reset. Click <a href="${resetUrl}">here</a> to reset your password.</p>`,
+    const content=`
+        <p>You requested a password reset. Click <a href="${resetUrl}">here</a> to reset your password.</p>
+        <p>If you didn’t request this, please ignore this email.</p>
+      `
+    await this.emailTemplate(email,"Password Reset Request",content)
+  }
+  async emailTemplate(email:string,subject:string,content:string){
+    const emailOptions = {
+      to: [{ email }],
+      sender: { name: "Factify Support", email: "noreply@factifygpt.com" }, // Update with your email domain
+      subject: subject,
+      htmlContent: content
     };
-
-    await transporter.sendMail(mailOptions);
+    try {
+      await this.brevoClient.sendTransacEmail(emailOptions);
+    } catch (error) {
+      console.log('e:',error);
+      throw new BadRequestException("Failed to send reset email");
+    }
   }
 }

@@ -16,6 +16,7 @@ export class FactController {
 
   @Get()
   findAll() {
+    console.log('findAll!!');
     return this.factService.findAll();
   }
   @Get(':id')

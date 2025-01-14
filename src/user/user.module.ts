@@ -5,9 +5,10 @@ import { UserController } from './user.controller';
 import { UserSchema } from './user.schema';
 import { UserService } from './user.service';
 import { FactModule } from "../fact/fact.module";
+import { ConfigModule } from "@nestjs/config";
 
 @Module({
-  imports: [
+  imports: [ConfigModule,
     MongooseModule.forFeature([{ name: 'User', schema: UserSchema }]),
     forwardRef(()=>FactModule)
   ],

@@ -6,55 +6,47 @@ import { Fact, FactDocument } from "./fact.schema";
 import { Model } from "mongoose";
 import { UserService } from "../user/user.service";
 import { SettingsService } from "../settings/settings.service";
-/*
-function parseContent(content) {
-  const parsedObject = {
-    truthStatus: "",
-    severity: "",
+function parseFactCheckResponse(inputString) {
+  // Split the input into lines
+  const lines = inputString.split('\n').filter(line => line.trim() !== '');
+
+  // Initialize the JSON object
+  const jsonResponse = {
+    explanation: '',
+    truthStatus: '',
+    severity: '',
     keyFacts: [],
-    references: [],
-    explanation: ""
+    references: []
   };
-  content = content.replace(/\*\*!/g, '');
-  // Extracting truth status
-  const truthStatusMatch = content.match(/Truth Status:\s*(\w+)/);
-  if (truthStatusMatch) {
-    parsedObject.truthStatus = truthStatusMatch[1].toLowerCase();
-  }
 
-  // Extracting severity
-  const severityMatch = content.match(/Severity:\s*(\w+)/);
-  if (severityMatch) {
-    parsedObject.severity = severityMatch[1].toLowerCase();
-  }
+  // Iterate through each line to extract information
+  lines.forEach(line => {
+    if (line.startsWith('**Truth Status:**')) {
+      jsonResponse.truthStatus = line.replace('**Truth Status:**', '').trim();
+    } else if (line.startsWith('**Explanation:**')) {
+      jsonResponse.explanation = line.replace('**Explanation:**', '').trim();
+    } else if (line.startsWith('**Severity:**')) {
+      jsonResponse.severity = line.replace('**Severity:**', '').trim();
+    } else if (line.startsWith('**Key Facts:**')) {
+      // Skip the heading line
+      return;
+    } else if (line.startsWith('1.') || line.startsWith('2.') || line.startsWith('3.')) {
+      // Extract key facts
+      jsonResponse.keyFacts.push(line.replace(/^\d+\.\s*/, '').trim());
+    } else if (line.startsWith('-')) {
+      // Extract references
+      const refMatch = line.match(/- (.+?): (.+)/);
+      if (refMatch) {
+        jsonResponse.references.push({
+          title: refMatch[1].trim(),
+          url: refMatch[2].trim()
+        });
+      }
+    }
+  });
 
-  // Extracting explanation
-  const explanationMatch = content.match(/Explanation:\s*([\s\S]*?)\s*Key Facts:/);
-  if (explanationMatch) {
-    parsedObject.explanation = explanationMatch[1].trim();
-  }
-
-  // Extracting key facts
-  const keyFactsMatch = content.match(/Key Facts:\s*([\s\S]*?)\s*References:/);
-  if (keyFactsMatch) {
-    parsedObject.keyFacts = keyFactsMatch[1]
-      .trim()
-      .split(/\n\d+\.\s*!/)
-      .filter(fact => fact);  // Removes any empty elements from splitting
-  }
-
-  // Extracting references
-  const referencesMatch = content.match(/References:\s*([\s\S]*)/);
-  if (referencesMatch) {
-    parsedObject.references = referencesMatch[1]
-      .trim()
-      .split(/\n\d+\.\s*!/)
-      .filter(reference => reference);
-  }
-
-  return parsedObject;
+  return jsonResponse;
 }
-*/
 @Injectable()
 export class FactService {
   constructor(
@@ -138,10 +130,11 @@ Here is the template of the expected JSON format:
       console.log('initial Content:',content);
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       console.log('jsonMathc:',jsonMatch);
+      let obj={}
       if (!jsonMatch) {
-        throw new BadRequestException("Something went wrong!")
+        obj=parseFactCheckResponse(content)
       }
-      const obj =JSON.parse(jsonMatch[0]);
+      else  obj =JSON.parse(jsonMatch[0]);
       console.log('obj:',obj);
       const currentObj=obj
       const user = await this.usersService.findById2(userId);

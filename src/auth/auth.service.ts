@@ -33,6 +33,7 @@ export class AuthService {
     const hashedPassword = await this.hashPassword(password);
 
     const newUser = await this.userService.create(name, email, hashedPassword);
+
     return this.userService._getUserDetails(newUser);
   }
 
@@ -91,7 +92,10 @@ export class AuthService {
           name:u.name,
           email:u.email,
           credits:u.credits,
-          subscription:u.subscription
+          subscription:u.subscription,
+          subscriptionType:u.subscriptionType,
+          role:u.role,
+          subscriptionIsActive:u.subscriptionIsActive,
         } };
     } catch (error) {
       throw new HttpException('Invalid JWT', HttpStatus.UNAUTHORIZED);

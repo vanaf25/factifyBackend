@@ -5,7 +5,6 @@ import { InjectModel } from "@nestjs/mongoose";
 import { LtdCode, LtdCodeDocument } from "./entities/ltd-code.entity";
 import { Model, Types } from "mongoose";
 import { UserService } from "../user/user.service";
-import { Cron } from "@nestjs/schedule";
 import { v4 as uuidv4 } from 'uuid';
 @Injectable()
 export class LtdCodeService {
@@ -14,24 +13,21 @@ export class LtdCodeService {
     private readonly userService:UserService,
   ) {
   }
-  @Cron('0 0 * * *') // This will run daily at midnight
   async checkAndAddMonthlyCredits() {
     const today = new Date();
 
-    // Find all LtdCodes where coupon was applied (usedAt exists)
-    const appliedCoupons = await this.ltdCodeModel.find({ usedAt: { $exists: true } })
+    const appliedCoupons = await this.ltdCodeModel.find(
+      { usedAt: { $exists: true } })
 
     for (const coupon of appliedCoupons) {
       const appliedDate = new Date(coupon.usedAt);
       if (this.isMonthlyAnniversary(appliedDate, today)) {
-        // Add 50 credits to the user
         await this.userService.addCredits(coupon.user as any , 50);
         console.log(`Added 50 credits to user ${coupon.user._id} for coupon anniversary.`);
       }
     }
   }
 
-  // Helper function to check if today is the monthly anniversary of the coupon application
   isMonthlyAnniversary(appliedDate: Date, today: Date): boolean {
     const isSameDay = appliedDate.getDate() === today.getDate(); // Check if the day matches
     const isNextMonth = today.getMonth() !== appliedDate.getMonth() && today.getFullYear() >= appliedDate.getFullYear();
