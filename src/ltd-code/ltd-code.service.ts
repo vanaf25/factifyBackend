@@ -1,6 +1,5 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { forwardRef, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { CreateLtdCodeDto } from './dto/create-ltd-code.dto';
-import { UpdateLtdCodeDto } from './dto/update-ltd-code.dto';
 import { InjectModel } from "@nestjs/mongoose";
 import { LtdCode, LtdCodeDocument } from "./entities/ltd-code.entity";
 import { Model, Types } from "mongoose";
@@ -10,7 +9,8 @@ import { v4 as uuidv4 } from 'uuid';
 export class LtdCodeService {
   constructor(
     @InjectModel(LtdCode.name) private ltdCodeModel: Model<LtdCodeDocument>,
-    private readonly userService:UserService,
+    @Inject(forwardRef(() => UserService))
+    private readonly userService: UserService,
   ) {
   }
   async checkAndAddMonthlyCredits() {
@@ -44,8 +44,8 @@ export class LtdCodeService {
     return codes.map(code=>code.code);
   }
   async redeemCode(userId: Types.ObjectId, codeId: string) {
-    console.log(codeId);
     const code = await this.ltdCodeModel.findOne({ code: codeId });
+    console.log('code:',code);
     if (!code || code.user) throw new NotFoundException('Code not found or already redeemed');
     await this.userService.findById(userId as any)
     await this.userService.applyCode(userId,code._id as string)
@@ -61,8 +61,17 @@ export class LtdCodeService {
     await this.ltdCodeModel.findByIdAndDelete(codeId);
     return {success:true}
   }
-  findAll() {
-    return `This action returns all ltdCode`;
+  async getCode(codeId: string) {
+      const code = await this.ltdCodeModel
+      .findOne({code:codeId})
+      .populate('user', '_id name email credits');
+    console.log('code:',code);
+    if (!code) {
+      throw new NotFoundException('LTD code not found');
+    }
+    return {
+      user:code.user
+    }
   }
   async getRedeemedCouponsByUserId(userId: string) {
     if (!Types.ObjectId.isValid(userId)) {
@@ -70,16 +79,10 @@ export class LtdCodeService {
     }
     return this.ltdCodeModel.find({ user: userId, usedAt: { $exists: true } });
   }
-  findOne(id: number) {
-    return `This action returns a #${id} ltdCode`;
-  }
-
-  update(id: number, updateLtdCodeDto: UpdateLtdCodeDto) {
-    console.log('upd:',updateLtdCodeDto);
-    return `This action updates a #${id} ltdCode`;
-  }
-
-  remove(id: number) {
-    return `This action removes a #${id} ltdCode`;
+  async removeUserCodes(codesId: Types.ObjectId[]) {
+    for (const code of codesId) {
+      await this.ltdCodeModel.findByIdAndDelete(code);
+    }
+    return { success: true, message: `${codesId} codes have been removed.` };
   }
 }

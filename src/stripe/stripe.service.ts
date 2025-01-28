@@ -40,8 +40,7 @@ const plans = {
 @Injectable()
 export class StripeService {
   private stripe: Stripe;
-  private readonly webhookSecret: string; // Declare webhookSecret as a private readonly property
-
+  private readonly webhookSecret: string;
   constructor(
     @InjectModel('Subscription') private readonly subscriptionModel:
       Model<SubscriptionDocument>,

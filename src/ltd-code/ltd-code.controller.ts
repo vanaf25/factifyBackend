@@ -21,13 +21,6 @@ export class LtdCodeController {
   async redeemCode(@Param('codeId') codeId: string, @GetUser() user: any) {
     return this.ltdCodeService.redeemCode(user.id, codeId);
   }
-
-  @Get()
-  @UseGuards(JwtGuard, RolesGuard)
-  findAll() {
-    return this.ltdCodeService.findAll();
-  }
-
   @Get('coupons/:id')
   @UseGuards(JwtGuard, RolesGuard)
   findOne(@Param('id') id: string) {
@@ -38,6 +31,11 @@ export class LtdCodeController {
   @UseGuards(JwtGuard, RolesGuard)
   remove(@Param('id') codeId: string) {
     return this.ltdCodeService.removeCode(codeId);
+  }
+  @UseGuards(JwtGuard, RolesGuard)
+  @Get(":id")
+  checkLTDCode(@Param('id') codeId: string){
+    return this.ltdCodeService.getCode(codeId)
   }
   @Cron('0 0 * * *')
   receiveCredits(){

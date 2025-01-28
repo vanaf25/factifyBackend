@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from "@nestjs/common";
 import { CouponCodeService } from './coupon-code.service';
 import { CouponCodeController } from './coupon-code.controller';
 import { MongooseModule } from "@nestjs/mongoose";

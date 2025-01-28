@@ -4,8 +4,11 @@ import { UserDetails } from './user-details.interface';
 import { JwtGuard } from "../auth/guards/jwt.guard";
 import { GetUser } from "../auth/decorators/get-user-decorator";
 import { UpdatePasswordDto } from "./dtos/update-password.dto";
+/*
 import { Cron } from "@nestjs/schedule";
+*/
 import { RolesGuard } from "../auth/guards/role.guard";
+import { Cron } from "@nestjs/schedule";
 
 @Controller('user')
 export class UserController {
@@ -42,6 +45,11 @@ export class UserController {
   async removeFavorite(@GetUser() user, @Param('factId') factId: string) {
     await this.userService.removeFavorite(user.id, factId);
     return { message: 'Fact removed from favorites' };
+  }
+  @UseGuards(JwtGuard, RolesGuard)
+  @Delete("/:id")
+  async deleteUser( @Param('id') id: string){
+    return await this.userService.removeUser(id)
   }
   @Get("/favoriteFacts")
   @UseGuards(JwtGuard)

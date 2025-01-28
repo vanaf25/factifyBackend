@@ -1,6 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { CreateCouponCodeDto } from './dto/create-coupon-code.dto';
-import { UpdateCouponCodeDto } from './dto/update-coupon-code.dto';
 import { InjectModel } from "@nestjs/mongoose";
 import { CouponCode, CouponCodeDocument } from "./entities/coupon-code.entity";
 import { Model } from "mongoose";
@@ -30,9 +29,10 @@ export class CouponCodeService {
     return this.couponModel.insertMany(coupons);
   }
   findAll() {
-    return this.couponModel.find();
+    return this.couponModel.find({
+      isActive:true
+    });
   }
-
  async findOne(code: string,userId:string) {
     const coupon = await this.couponModel.findOne({ code }).exec();
     if (!coupon) {
@@ -46,13 +46,12 @@ export class CouponCodeService {
     await coupon.save();
     return {creditsAdded:coupon.creditValue};
   }
-
-  update(id: number, updateCouponCodeDto: UpdateCouponCodeDto) {
-    console.log(updateCouponCodeDto);
-    return `This action updates a #${id} couponCode`;
+/*
+  async removeUserCodes(codesId:string[]){
+    for (const code of codesId) {
+      await this.couponModel.findByIdAndDelete(code);
+    }
+    return { success: true, message: `${codesId} codes have been removed.` };
   }
-
-  remove(id: number) {
-    return `This action removes a #${id} couponCode`;
-  }
+*/
 }

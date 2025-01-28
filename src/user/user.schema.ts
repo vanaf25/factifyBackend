@@ -1,9 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-
 import { Document, Types } from "mongoose";
 
 export type UserDocument = User & Document;
-
 @Schema()
 export class User {
   @Prop({ required: true })
@@ -33,9 +31,9 @@ export class User {
   @Prop({default:""})
   subscriptionType: string;
   @Prop({ default: false })
-  subscriptionIsActive: boolean; // Indicates if the user has an active subscription
+  subscriptionIsActive: boolean;
   @Prop({ type: Date })
-  subscriptionEndDate: Date; // Date when the subscription ends
+  subscriptionEndDate: Date;
   @Prop({ type: Date })
   lastCreditUpdate: Date;
   @Prop({default:""})
@@ -49,5 +47,4 @@ export class User {
   @Prop({ type: String, enum: ['user', 'admin'], default: 'user' })
   role: 'user' | 'admin';
 }
-
 export const UserSchema = SchemaFactory.createForClass(User);

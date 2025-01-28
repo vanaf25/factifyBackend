@@ -1,9 +1,8 @@
-import { BadRequestException, forwardRef, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, forwardRef, Inject, Injectable, NotFoundException,ForbiddenException } from "@nestjs/common";
 import { CreateFactDto } from './dto/create-fact.dto';
-import { UpdateFactDto } from './dto/update-fact.dto';
 import { InjectModel } from "@nestjs/mongoose";
 import { Fact, FactDocument } from "./fact.schema";
-import { Model } from "mongoose";
+import { Model,Types } from "mongoose";
 import { UserService } from "../user/user.service";
 import { SettingsService } from "../settings/settings.service";
 function parseFactCheckResponse(inputString) {
@@ -57,6 +56,8 @@ export class FactService {
   ) {
   }
   async create(createFactDto: CreateFactDto,userId:string) {
+    const user = await this.usersService.findById2(userId);
+    if (user.credits<=0) throw new ForbiddenException("You don't have credits to make a search");
     try{
       const settingsData=await this.settingsService.getSettings();
       const apiKey=settingsData?.apiKey || "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";
@@ -106,45 +107,50 @@ Here is the template of the expected JSON format:
 }
 }
      `
+      console.log('apiKey: ',apiKey);
+      console.log('prompt: ',prompt);
+      console.log('createFactDto.fact: ',createFactDto.fact);
       const options = {
         method: 'POST',
         headers: {Authorization: `Bearer ${apiKey} `, 'Content-Type': 'application/json'},
         body:JSON.stringify( {
-          "model":"llama-3.1-sonar-small-128k-online",
-          "messages":[
-            {
-              role: 'system',
-              content: prompt
-            },
-            {
-              role: 'user',
-              content: createFactDto.fact
-            }
-          ]
-        }
+            "model":"sonar",
+            "messages":[
+              {
+                role: 'system',
+                content: prompt
+              },
+              {
+                role: 'user',
+                content: createFactDto.fact
+              }
+            ]
+          }
         ),
       };
       const response = await fetch('https://api.perplexity.ai/chat/completions', options);
       const data = await response.json();
+      console.log("From perplecity:",data);
       const content = data.choices[0].message.content;
-      console.log('initial Content:',content);
+      console.log('content:',content);
       const jsonMatch = content.match(/\{[\s\S]*\}/);
-      console.log('jsonMathc:',jsonMatch);
       let obj={}
       if (!jsonMatch) {
         obj=parseFactCheckResponse(content)
       }
-      else  obj =JSON.parse(jsonMatch[0]);
+    else  obj =JSON.parse(jsonMatch[0]);
       console.log('obj:',obj);
       const currentObj=obj
-      const user = await this.usersService.findById2(userId);
       const upd={
         ...currentObj,
         title:createFactDto.fact,
         user:user._id}
+      console.log('upd:',upd);
       const newFact=new this.factModel(upd);
       const savedFact = await newFact.save();
+      console.log('svdFact:',savedFact);
       await this.usersService.makeSearch(userId,savedFact._id as string);
+      console.log('receiveCredits succesfully!');
       return savedFact;
     }
     catch (e){
@@ -152,26 +158,11 @@ Here is the template of the expected JSON format:
       throw new BadRequestException("Something went wrong!")
     }
   }
-  findAll() {
-    return `This action returns all fact`;
-  }
-    async findById(id:string){
-      const fact = await this.factModel
-        .findById(id).populate('favoriteUsers');
-      if(!fact) throw new NotFoundException("Fact was not founded")
-      return fact
-    }
-  findOne(id: number) {
-    return `This action returns a #${id} fact`;
-  }
-
-  update(id: number, updateFactDto: UpdateFactDto) {
-    console.log(updateFactDto);
-    return `This action updates a #${id} fact`;
-  }
-
-  remove(id: number) {
-    return `This action removes a #${id} fact`;
+  async findById(id:string){
+    const fact = await this.factModel
+      .findById(id).populate('favoriteUsers');
+    if(!fact) throw new NotFoundException("Fact was not founded")
+    return fact
   }
   async deleteFact(factId: string, userId: string): Promise<{ message: string }> {
     const fact = await this.factModel.findById(factId).exec();
@@ -187,5 +178,11 @@ Here is the template of the expected JSON format:
     await user.save();
     // Remove the fact from any user's facts list
     return { message: 'Fact successfully deleted' };
+  }
+  async deleteUserFacts(factsId:Types.ObjectId[]){
+    for (const id of factsId) {
+      await this.factModel.findByIdAndDelete(id);
+    }
+    return { success: true, message: `${factsId.length} codes have been removed.` };
   }
 }

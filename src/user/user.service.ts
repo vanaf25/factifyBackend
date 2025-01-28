@@ -15,7 +15,7 @@ import { FactService } from "../fact/fact.service";
 import * as bcrypt from 'bcrypt'
 import { UpdatePasswordDto } from "./dtos/update-password.dto";
 import { ConfigService } from "@nestjs/config";
-
+import { LtdCodeService } from "../ltd-code/ltd-code.service";
 @Injectable()
 export class UserService {
   private readonly brevoClient: SibApiV3Sdk.TransactionalEmailsApi;
@@ -23,7 +23,10 @@ export class UserService {
     @InjectModel('User') private readonly userModel: Model<UserDocument>,
     @Inject(forwardRef(() => FactService))
     private readonly factsService: FactService,
+    @Inject(forwardRef(() => LtdCodeService))
+    private readonly ltdCodeService: LtdCodeService,
     private configService: ConfigService,
+
   ) {
     this.brevoClient = new SibApiV3Sdk.TransactionalEmailsApi();
     SibApiV3Sdk.ApiClient.instance.authentications["api-key"].apiKey =this.configService.get<string>('BREVO_API_KEY');
@@ -39,15 +42,6 @@ export class UserService {
       role:user.role,
     };
   }
-  _getUserDetailsWithMail(user: UserDocument):UserDetails{
-    //Send email when user register on factify;
-    return {
-      id: user._id as string,
-      name: user.name,
-      email: user.email,
-      role:user.role
-    };
-  }
   async changeSubscription(userId: string, data:
     {plan:string,customerId:string,subscriptionId:string,type:string}) {
     const newPlan=data.plan;
@@ -59,7 +53,7 @@ export class UserService {
     const plans = {
       'starter': 10,
       'pro': 100,
-      'business': 150,
+      'business': 300,
     };
 
     if (!plans[newPlan]) {
@@ -93,7 +87,7 @@ export class UserService {
     return user;
   }
   async creditsBasedOnSubscriptionDate() {
-    console.log('cron Handle!');
+    console.log('user  cron Handle!');
     const plans = {
       'starter': 10,
       'pro': 100,
@@ -267,6 +261,7 @@ export class UserService {
     u.credits=u.credits-1;
     u.facts.push(factId as any);
     await u.save()
+    console.log('operations in userService all successsul!');
   }
   async findByEmail(email: string): Promise<UserDocument | null> {
     return this.userModel.findOne({ email }).exec();
@@ -278,12 +273,12 @@ export class UserService {
         model: 'Fact',
         options: { sort: { createdAt: -1 }, limit: 15 }, // Sort by createdAt in descending order, limit to 15
       })
-    return [...user.facts].map((u:any)=>{
+    return user?.facts?.length ?  [...user.facts].map((u:any)=>{
       return {
         ...JSON.parse(JSON.stringify(u)),
         favoriteUsers:undefined,
         isFavorite:u?.favoriteUsers?.includes(new mongoose.Types.ObjectId(userId))}
-    })
+    }):[]
   }
   async findById(id: string): Promise<UserDetails | null> {
     const user = await this.userModel.findById(id).exec();
@@ -343,9 +338,7 @@ export class UserService {
       password: hashedPassword,
     });
     const savedUser = await newUser.save();
-    console.log('welcm!!!');
     await this.sendWelcomeEmail(email, name);
-    console.log('reg');
     return savedUser;
   }
   async addFavorite(userId: string, factId: string) {
@@ -374,8 +367,16 @@ export class UserService {
     user.favoriteFacts.push(fact._id);
     return user.save();
   }
-
-  // Remove a fact from user's favorites
+  async removeUser(userId:string){
+    console.log('id:',userId);
+   const user= await this.findById2(userId)
+      await this.cancelSubscription(userId)
+      await this.factsService.deleteUserFacts(user.facts)
+      await this.ltdCodeService.removeUserCodes(user.ltdCodes)
+      await this.userModel.findByIdAndDelete(userId)
+      await this.sendDeletedEmail(user.email,user.name)
+      return {message:"User deleted successfully!"}
+  }
   async removeFavorite(userId: string, factId: string) {
     if (!Types.ObjectId.isValid(userId)) {
       throw new BadRequestException('Invalid user ID');
@@ -452,6 +453,15 @@ export class UserService {
         <p>If you didn’t request this, please ignore this email.</p>
       `
     await this.emailTemplate(email,"Password Reset Request",content)
+  }
+  async sendDeletedEmail(email:string,name:string){
+    const content=`
+<h3>Hi,${name}</h3>
+  <p>
+      We’re writing to let you know that your account has been permanently deleted.  
+      If this was a mistake or you need assistance, please <a href="mailto:contactus@factifygpt.com">contact contactus@factifygpt.com</a>.
+    </p>`
+    await this.emailTemplate(email,"Account Deleted",content)
   }
   async emailTemplate(email:string,subject:string,content:string){
     const emailOptions = {
